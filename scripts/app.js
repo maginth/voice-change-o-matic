@@ -23,7 +23,7 @@ var mute = document.querySelector('.mute');
 var analyser = audioCtx.createAnalyser();
 analyser.minDecibels = -90;
 analyser.maxDecibels = -10;
-analyser.smoothingTimeConstant = 0.85;
+analyser.smoothingTimeConstant = 0.01;
 
 var distortion = audioCtx.createWaveShaper();
 var gainNode = audioCtx.createGain();
@@ -77,7 +77,11 @@ ajaxRequest.send();
 // set up canvas context for visualizer
 
 var canvas = document.querySelector('.visualizer');
+var canvas2 = document.querySelector('.full-spetrum');
 var canvasCtx = canvas.getContext("2d");
+var canvasCtx2 = canvas2.getContext("2d");
+var img = canvasCtx2.createImageData(1,canvas2.height);
+var pixels = new Int32Array(img.data.buffer);
 
 var intendedWidth = document.querySelector('.wrapper').clientWidth;
 
@@ -120,6 +124,33 @@ if (navigator.getUserMedia) {
 } else {
    console.log('getUserMedia not supported on your browser!');
 }
+
+function hslToRgb(h, s, l){
+    var r, g, b;
+
+    if(s == 0){
+        r = g = b = l; // achromatic
+    }else{
+        function hue2rgb(p, q, t){
+            if(t < 0) t += 1;
+            if(t > 1) t -= 1;
+            if(t < 1/6) return p + (q - p) * 6 * t;
+            if(t < 1/2) return q;
+            if(t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+            return p;
+        }
+
+        var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        var p = 2 * l - q;
+        r = hue2rgb(p, q, h + 1/3);
+        g = hue2rgb(p, q, h);
+        b = hue2rgb(p, q, h - 1/3);
+    }
+
+    return 0xff000000 + (Math.round(r * 255) << 16) + (Math.round(g * 255) << 8) +  Math.round(b * 255);
+}
+
+var current_pixel_column = 0;
 
 function visualize() {
   WIDTH = canvas.width;
@@ -175,12 +206,14 @@ function visualize() {
     draw();
 
   } else if(visualSetting == "frequencybars") {
-    analyser.fftSize = 256;
+    analyser.fftSize = 8192*4;
+    var puiss = 15 - 15;
     var bufferLength = analyser.frequencyBinCount;
     console.log(bufferLength);
     var dataArray = new Uint8Array(bufferLength);
 
     canvasCtx.clearRect(0, 0, WIDTH, HEIGHT);
+    pixels
 
     function draw() {
       drawVisual = requestAnimationFrame(draw);
@@ -192,16 +225,31 @@ function visualize() {
 
       var barWidth = (WIDTH / bufferLength) * 2.5;
       var barHeight;
-      var x = 0;
+      var x = 0, yp = canvas2.height, y = 0;
+
+      function limit(a) {return a > 255 ? 255 : a < 0 ? 0 : a} 
+
+      if (++current_pixel_column >= canvas2.width)
+         current_pixel_column = 0;
 
       for(var i = 0; i < bufferLength; i++) {
         barHeight = dataArray[i];
 
-        canvasCtx.fillStyle = 'rgb(' + (barHeight+100) + ',50,50)';
-        canvasCtx.fillRect(x,HEIGHT-barHeight/2,barWidth,barHeight/2);
+        canvasCtx.fillStyle = 'rgba(' + (barHeight+100) + ',50,50,'+ (100/i) + ')';
+        canvasCtx.fillRect(Math.log(x)*100,HEIGHT-barHeight/2,Math.max(60/x,1),barHeight/2);
 
-        x += barWidth + 1;
+        y = canvas2.height - ((3*Math.log(i<<puiss) * 61) >> 0)+500;
+        if (y < canvas2.height)
+          while(yp >= y) {
+            pixels[yp] = hslToRgb(Math.max(0, barHeight/100-0.5), barHeight/200, barHeight/200);
+
+            yp--;
+          }
+
+        x += barWidth/5 + 1;
       }
+      canvasCtx2.putImageData(img, current_pixel_column, 0);
+      canvasCtx2.putImageData(img, ++current_pixel_column, 0);
     };
 
     draw();
